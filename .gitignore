@@ -50,3 +50,6 @@ Thumbs.db
 # RPX reports & temp files
 *.rpx.json
 *.rpx.csv
+rpx-report.*
+rpx-graph.*
+

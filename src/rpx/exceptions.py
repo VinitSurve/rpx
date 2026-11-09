@@ -35,3 +35,27 @@ class GitError(RPXError):
     """Raised when an error occurs while interacting with Git."""
 
     pass
+
+
+class CacheError(RPXError):
+    """Raised when cache reading or writing fails."""
+
+    pass
+
+
+class SnapshotError(RPXError):
+    """Raised when snapshot operations fail."""
+
+    pass
+
+
+class AIProviderError(RPXError):
+    """Raised when an optional AI provider encounters an error (auth, rate limit, network)."""
+
+    pass
+
+
+class CIThresholdError(RPXError):
+    """Raised when a CI quality gate threshold is violated."""
+
+    pass

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, Sequence
 
 from rich.box import ROUNDED, SIMPLE
 from rich.columns import Columns
@@ -24,7 +25,7 @@ from rpx.constants import (
     COLOR_WARNING,
     COLOR_WHITE,
 )
-from rpx.models import ScanResult
+from rpx.models import ComparisonDiff, ScanResult
 from rpx.utils.formatting import (
     format_bytes,
     format_duration,
@@ -74,8 +75,75 @@ class TerminalReporter:
             self.render_git_panel(result)
         self.render_health_panel(result)
         self.render_storage_panel(result, ranking_limit=ranking_limit)
+        self.render_coverage_panel(result)
         if show_structure:
             self.render_tree_panel(result, depth=tree_depth)
+        if result.ignored_items:
+            self.render_ignored_items(result)
+        self.render_footer(result)
+
+    def render_summary(self, result: ScanResult) -> None:
+        """Render a concise executive summary of the repository."""
+        self.render_header(result)
+        self.render_overview_cards(result)
+
+        table = Table(box=SIMPLE, expand=True, show_header=False)
+        table.add_column("Metric", style=f"bold {COLOR_MUTED}", width=26)
+        table.add_column("Value", style=COLOR_WHITE)
+
+        fp = result.fingerprint
+        table.add_row(
+            "Primary Languages",
+            ", ".join(fp.primary_languages) or (result.languages.most_used_language or "None"),
+        )
+        if fp.frameworks:
+            table.add_row("Detected Frameworks", ", ".join(fp.frameworks))
+        if fp.package_managers or fp.build_tools:
+            table.add_row(
+                "Tooling & Build",
+                ", ".join(dict.fromkeys(fp.package_managers + fp.build_tools)),
+            )
+        if fp.test_frameworks or fp.linters:
+            table.add_row(
+                "Quality & Testing",
+                ", ".join(dict.fromkeys(fp.test_frameworks + fp.linters + fp.type_checkers)),
+            )
+
+        table.add_row(
+            "Code Complexity",
+            f"Avg CC: {result.complexity.avg_function_complexity:.2f} • Max CC: {result.complexity.max_function_complexity} • Functions: {result.complexity.total_functions}",
+        )
+        table.add_row(
+            "Technical Debt",
+            f"{result.debt.total_items} items (High: {result.debt.by_severity.get('high', 0)}, Medium: {result.debt.by_severity.get('medium', 0)}, Low: {result.debt.by_severity.get('low', 0)})",
+        )
+        table.add_row(
+            "Security Indicators",
+            f"{result.security.total_findings} findings (High: {result.security.by_severity.get('high', 0)})",
+        )
+        score_color = (
+            COLOR_SUCCESS
+            if result.health.score >= 80
+            else (COLOR_WARNING if result.health.score >= 55 else COLOR_ERROR)
+        )
+        table.add_row(
+            "Project Health Score",
+            f"[bold {score_color}]{result.health.score}/100[/]",
+        )
+        if result.health.recommendations:
+            table.add_row(
+                "Top Next Step",
+                f"[{COLOR_PRIMARY}]{result.health.recommendations[0]}[/]",
+            )
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_PRIMARY}]EXECUTIVE REPOSITORY SUMMARY[/]",
+                border_style=COLOR_PRIMARY,
+                box=ROUNDED,
+            )
+        )
         self.render_footer(result)
 
     def render_header(self, result: ScanResult) -> None:
@@ -85,16 +153,19 @@ class TerminalReporter:
         self.console.print()
 
         proj_type_str = ", ".join(result.metadata.project_types) or "General"
-        header_text = Text()
-        header_text.append("Project: ", style=f"bold {COLOR_MUTED}")
-        header_text.append(f"{result.metadata.name}\n", style=f"bold {COLOR_PRIMARY}")
-        header_text.append("Location: ", style=f"bold {COLOR_MUTED}")
-        header_text.append(f"{result.metadata.path}\n", style=f"{COLOR_WHITE}")
-        header_text.append("Ecosystem: ", style=f"bold {COLOR_MUTED}")
-        header_text.append(f"{proj_type_str}  ", style=f"bold {COLOR_SECONDARY}")
-        header_text.append("•  Scan Time: ", style=f"bold {COLOR_MUTED}")
-        header_text.append(
-            f"{format_duration(result.duration_seconds)}", style=f"bold {COLOR_SUCCESS}"
+        cache_badge = ""
+        if result.cache_stats.enabled:
+            if result.cache_stats.is_incremental and result.cache_stats.hits > 0:
+                cache_badge = f"  •  Cache: [bold {COLOR_SUCCESS}]Incremental ({result.cache_stats.hits} hits)[/]"
+            else:
+                cache_badge = f"  •  Cache: [dim]Cold/Full ({result.cache_stats.misses} scanned)[/]"
+
+        header_text = Text.from_markup(
+            f"[bold {COLOR_MUTED}]Project:[/] [bold {COLOR_PRIMARY}]{result.metadata.name}[/]\n"
+            f"[bold {COLOR_MUTED}]Location:[/] [{COLOR_WHITE}]{result.metadata.path}[/]\n"
+            f"[bold {COLOR_MUTED}]Ecosystem:[/] [bold {COLOR_SECONDARY}]{proj_type_str}[/]  "
+            f"•  [bold {COLOR_MUTED}]Scan Time:[/] [bold {COLOR_SUCCESS}]{format_duration(result.duration_seconds)}[/]"
+            f"{cache_badge}"
         )
 
         self.console.print(
@@ -146,14 +217,32 @@ class TerminalReporter:
         return Panel(t, box=ROUNDED, border_style="dim", padding=(0, 1))
 
     def render_metadata_panel(self, result: ScanResult) -> None:
-        """Render project metadata table."""
+        """Render project metadata and fingerprinting evidence table."""
         table = Table(box=SIMPLE, expand=True, show_header=False)
-        table.add_column("Property", style=f"bold {COLOR_MUTED}", width=22)
+        table.add_column("Property", style=f"bold {COLOR_MUTED}", width=24)
         table.add_column("Value", style=COLOR_WHITE)
 
         table.add_row("Project Name", result.metadata.name)
         table.add_row("Absolute Path", result.metadata.path)
         table.add_row("Detected Ecosystems", ", ".join(result.metadata.project_types))
+
+        fp = result.fingerprint
+        if fp.frameworks:
+            table.add_row("Frameworks", ", ".join(fp.frameworks))
+        if fp.package_managers:
+            table.add_row("Package Managers", ", ".join(fp.package_managers))
+        if fp.build_tools:
+            table.add_row("Build Tools", ", ".join(fp.build_tools))
+        if fp.test_frameworks:
+            table.add_row("Test Frameworks", ", ".join(fp.test_frameworks))
+        if fp.linters or fp.formatters:
+            table.add_row(
+                "Linters & Formatters",
+                ", ".join(dict.fromkeys(fp.linters + fp.formatters)),
+            )
+        if fp.conventions:
+            table.add_row("Conventions", ", ".join(fp.conventions))
+
         table.add_row("Filesystem Created", result.metadata.created_at or "[dim]Unavailable[/dim]")
         table.add_row(
             "Last File Modified", result.metadata.last_modified or "[dim]Unavailable[/dim]"
@@ -177,7 +266,7 @@ class TerminalReporter:
         self.console.print(
             Panel(
                 table,
-                title=f"[bold {COLOR_PRIMARY}]PROJECT METADATA[/]",
+                title=f"[bold {COLOR_PRIMARY}]PROJECT METADATA & FINGERPRINT[/]",
                 border_style=COLOR_PRIMARY,
                 box=ROUNDED,
             )
@@ -234,7 +323,6 @@ class TerminalReporter:
                 f"[bold {COLOR_SUCCESS}]{ratio}:1[/]",
             )
 
-        # Verification tag
         reconciled = (
             result.loc.total_physical
             == result.loc.total_code + result.loc.total_comment + result.loc.total_blank
@@ -247,7 +335,7 @@ class TerminalReporter:
 
         self.console.print(
             Panel(
-                Group(table, Text(f"\n{recon_text}", justify="right")),
+                Group(table, Text.from_markup(f"\n{recon_text}", justify="right")),
                 title=f"[bold {COLOR_SUCCESS}]LINES OF CODE (LOC) ANALYTICS[/]",
                 border_style=COLOR_SUCCESS,
                 box=ROUNDED,
@@ -264,7 +352,6 @@ class TerminalReporter:
         table.add_column("Distribution", style=COLOR_PRIMARY, width=22)
         table.add_column("Share", justify="right", style=f"bold {COLOR_SECONDARY}", width=8)
 
-        # Programming languages first
         for name, stat in result.languages.languages.items():
             if not stat.is_markup_or_data:
                 bar = render_horizontal_bar(stat.percentage, width=18)
@@ -276,7 +363,6 @@ class TerminalReporter:
                     format_percentage(stat.percentage),
                 )
 
-        # Markup & config languages section
         markup_stats = [s for s in result.languages.languages.values() if s.is_markup_or_data]
         if markup_stats:
             table.add_row("[dim]Markup & Config[/]", "", "", "", "")
@@ -294,7 +380,7 @@ class TerminalReporter:
 
         self.console.print(
             Panel(
-                Group(table, Text(f"\n{summary_text}", justify="left")),
+                Group(table, Text.from_markup(f"\n{summary_text}", justify="left")),
                 title=f"[bold {COLOR_SECONDARY}]PROGRAMMING LANGUAGE DISTRIBUTION[/]",
                 border_style=COLOR_SECONDARY,
                 box=ROUNDED,
@@ -304,7 +390,6 @@ class TerminalReporter:
 
     def render_file_stats_panel(self, result: ScanResult, ranking_limit: int = 10) -> None:
         """Render file categorization breakdown and top extensions table."""
-        # Left: file categories
         cat_table = Table(box=SIMPLE, show_header=False, expand=True)
         cat_table.add_column("Category", style=f"bold {COLOR_MUTED}")
         cat_table.add_column("Count", justify="right", style=COLOR_WHITE)
@@ -321,7 +406,6 @@ class TerminalReporter:
         cat_table.add_row("Skipped / Ignored", format_number(result.files.skipped_files))
         cat_table.add_row("Unreadable Files", format_number(result.files.unreadable_files))
 
-        # Right: top extensions
         ext_table = Table(box=SIMPLE, expand=True)
         ext_table.add_column("Extension", style=f"bold {COLOR_PRIMARY}")
         ext_table.add_column("Files", justify="right", style=COLOR_WHITE)
@@ -399,11 +483,459 @@ class TerminalReporter:
                 )
             table.add_row("Missing in Lockfile/Env", f"[{COLOR_ERROR}]{missing_sample}[/]")
 
+        # Also list declared packages if any
+        dep_table = Table(box=SIMPLE, expand=True)
+        dep_table.add_column("Package", style=f"bold {COLOR_PRIMARY}")
+        dep_table.add_column("Constraint", style=COLOR_WHITE)
+        dep_table.add_column("Type", style=COLOR_MUTED)
+        dep_table.add_column("Ecosystem", style=COLOR_SECONDARY)
+
+        for dep in result.dependencies.declared_dependencies[:20]:
+            dep_table.add_row(dep.name, dep.constraint or "*", dep.dep_type, dep.ecosystem)
+
+        body = Group(table, dep_table) if result.dependencies.declared_dependencies else table
         self.console.print(
             Panel(
-                table,
+                body,
                 title=f"[bold {COLOR_WARNING}]DEPENDENCY & PACKAGE ANALYSIS[/]",
                 border_style=COLOR_WARNING,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_complexity_panel(
+        self,
+        result: ScanResult,
+        threshold_filter: str | None = None,
+        file_filter: str | None = None,
+    ) -> None:
+        """Render code complexity analysis, distribution, and hotspot functions."""
+        comp = result.complexity
+
+        # If a specific file filter is requested, show per-function details for that file
+        if file_filter:
+            norm_filter = file_filter.replace("\\", "/")
+            matched_fc = next(
+                (
+                    fc
+                    for fc in comp.files
+                    if fc.path == norm_filter or fc.path.endswith(norm_filter)
+                ),
+                None,
+            )
+            if not matched_fc:
+                self.console.print(
+                    f"[{COLOR_WARNING}]No complexity data found for file '{file_filter}'.[/]"
+                )
+                return
+
+            f_table = Table(box=SIMPLE, expand=True)
+            f_table.add_column("Function / Method", style=f"bold {COLOR_PRIMARY}")
+            f_table.add_column("Lines", justify="right", style=COLOR_MUTED)
+            f_table.add_column("Length", justify="right", style=COLOR_WHITE)
+            f_table.add_column("Cyclomatic (CC)", justify="right", style=f"bold {COLOR_WHITE}")
+            f_table.add_column("Params", justify="right", style=COLOR_MUTED)
+            f_table.add_column("Nesting", justify="right", style=COLOR_SECONDARY)
+            f_table.add_column("Severity", justify="center")
+
+            for fn in matched_fc.functions:
+                sev_col = (
+                    COLOR_ERROR
+                    if fn.severity in ("high", "critical")
+                    else (COLOR_WARNING if fn.severity == "medium" else COLOR_SUCCESS)
+                )
+                f_table.add_row(
+                    fn.name,
+                    f"{fn.start_line}-{fn.end_line}",
+                    str(fn.line_count),
+                    str(fn.cyclomatic_complexity),
+                    str(fn.parameter_count),
+                    str(fn.max_nesting_depth),
+                    f"[bold {sev_col}]{fn.severity.upper()}[/]",
+                )
+
+            self.console.print(
+                Panel(
+                    f_table,
+                    title=f"[bold {COLOR_PRIMARY}]FILE COMPLEXITY: {matched_fc.path} ({matched_fc.language})[/]",
+                    border_style=COLOR_PRIMARY,
+                    box=ROUNDED,
+                )
+            )
+            self.console.print()
+            return
+
+        # Summary & distribution table
+        sum_table = Table(box=SIMPLE, show_header=False, expand=True)
+        sum_table.add_column("Metric", style=f"bold {COLOR_MUTED}")
+        sum_table.add_column("Value", justify="right", style=f"bold {COLOR_WHITE}")
+
+        sum_table.add_row("Source Files Analyzed", format_number(comp.files_analyzed))
+        sum_table.add_row("Total Functions / Methods", format_number(comp.total_functions))
+        sum_table.add_row("Total Classes / Structs", format_number(comp.total_classes))
+        sum_table.add_row("Average Cyclomatic Complexity", f"{comp.avg_function_complexity:.2f}")
+        sum_table.add_row("Maximum Cyclomatic Complexity", str(comp.max_function_complexity))
+        sum_table.add_row("Average Function Length", f"{comp.avg_function_length:.1f} lines")
+        sum_table.add_row("Max Control-Flow Nesting", str(comp.max_nesting_depth))
+
+        dist_table = Table(box=SIMPLE, expand=True)
+        dist_table.add_column("Band", style=f"bold {COLOR_WHITE}")
+        dist_table.add_column("Functions", justify="right", style=COLOR_WHITE)
+        dist_table.add_column("Share", justify="right", style=COLOR_SECONDARY)
+
+        tot_fn = max(1, comp.total_functions)
+        for band, col in [
+            ("low", COLOR_SUCCESS),
+            ("medium", COLOR_WARNING),
+            ("high", COLOR_ERROR),
+            ("critical", COLOR_ERROR),
+        ]:
+            cnt = comp.distribution.get(band, 0)
+            pct = (cnt / tot_fn) * 100.0
+            dist_table.add_row(
+                f"[bold {col}]{band.upper()}[/]",
+                format_number(cnt),
+                format_percentage(pct),
+            )
+
+        # Hotspot functions table
+        fn_table = Table(box=SIMPLE, expand=True)
+        fn_table.add_column("Function", style=f"bold {COLOR_PRIMARY}")
+        fn_table.add_column("Location", style=COLOR_MUTED)
+        fn_table.add_column("CC", justify="right", style=f"bold {COLOR_WARNING}")
+        fn_table.add_column("Lines", justify="right", style=COLOR_WHITE)
+        fn_table.add_column("Nesting", justify="right", style=COLOR_SECONDARY)
+        fn_table.add_column("Params", justify="right", style=COLOR_MUTED)
+        fn_table.add_column("Severity", justify="center")
+
+        all_fns = [fn for fc in comp.files for fn in fc.functions]
+        if threshold_filter:
+            tf = threshold_filter.lower()
+            if tf == "high":
+                all_fns = [f for f in all_fns if f.severity in ("high", "critical")]
+            elif tf == "medium":
+                all_fns = [f for f in all_fns if f.severity in ("medium", "high", "critical")]
+            elif tf == "critical":
+                all_fns = [f for f in all_fns if f.severity == "critical"]
+
+        all_fns.sort(key=lambda x: (x.cyclomatic_complexity, x.line_count), reverse=True)
+        for fn in all_fns[:15]:
+            sev_col = (
+                COLOR_ERROR
+                if fn.severity in ("high", "critical")
+                else (COLOR_WARNING if fn.severity == "medium" else COLOR_SUCCESS)
+            )
+            fn_table.add_row(
+                truncate_string(fn.name, 28),
+                f"{truncate_string(fn.file_path, 30)}:{fn.start_line}",
+                str(fn.cyclomatic_complexity),
+                str(fn.line_count),
+                str(fn.max_nesting_depth),
+                str(fn.parameter_count),
+                f"[bold {sev_col}]{fn.severity.upper()}[/]",
+            )
+
+        top_cols = Columns(
+            [
+                Panel(
+                    sum_table, title="[bold]Complexity Summary[/]", box=ROUNDED, border_style="dim"
+                ),
+                Panel(
+                    dist_table,
+                    title="[bold]Complexity Distribution[/]",
+                    box=ROUNDED,
+                    border_style="dim",
+                ),
+            ],
+            expand=True,
+        )
+
+        self.console.print(
+            Panel(
+                Group(
+                    top_cols,
+                    Panel(
+                        fn_table,
+                        title="[bold]Most Complex Functions[/]",
+                        box=ROUNDED,
+                        border_style="dim",
+                    ),
+                ),
+                title=f"[bold {COLOR_PRIMARY}]CODE COMPLEXITY & STRUCTURE ANALYSIS[/]",
+                border_style=COLOR_PRIMARY,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_graph_panel(self, result: ScanResult) -> None:
+        """Render internal module dependency graph, coupling, layers, and circular dependencies."""
+        g = result.graph
+
+        meta_table = Table(box=SIMPLE, show_header=False, expand=True)
+        meta_table.add_column("Metric", style=f"bold {COLOR_MUTED}")
+        meta_table.add_column("Value", justify="right", style=f"bold {COLOR_WHITE}")
+
+        meta_table.add_row("Internal Modules", str(g.total_modules))
+        meta_table.add_row("Internal Import Edges", str(g.total_internal_edges))
+        meta_table.add_row("External Packages Referenced", str(g.total_external_packages))
+        meta_table.add_row("Circular Dependency Cycles", str(len(g.cycles)))
+        meta_table.add_row("Layer Violations", str(len(g.unexpected_layer_dependencies)))
+        meta_table.add_row(
+            "Detected Entry Points", ", ".join(g.entry_points[:5]) or "[dim]None[/dim]"
+        )
+        meta_table.add_row(
+            "Central Hub Modules", ", ".join(g.central_hub_modules[:5]) or "[dim]None[/dim]"
+        )
+
+        mod_table = Table(box=SIMPLE, expand=True)
+        mod_table.add_column("Module", style=f"bold {COLOR_PRIMARY}")
+        mod_table.add_column("Layer", style=COLOR_SECONDARY)
+        mod_table.add_column("Fan-In", justify="right", style=COLOR_SUCCESS)
+        mod_table.add_column("Fan-Out", justify="right", style=COLOR_WARNING)
+        mod_table.add_column("Internal Imports", style=COLOR_WHITE)
+
+        for mod in g.modules[:15]:
+            imps = ", ".join(mod.internal_imports[:4])
+            if len(mod.internal_imports) > 4:
+                imps += f" (+{len(mod.internal_imports) - 4})"
+            mod_table.add_row(
+                mod.name,
+                mod.layer,
+                str(mod.fan_in),
+                str(mod.fan_out),
+                imps or "[dim]—[/dim]",
+            )
+
+        elements: list[Any] = [meta_table, mod_table]
+
+        if g.cycles:
+            cyc_text = Text()
+            cyc_text.append("\nCircular Dependencies Detected:\n", style=f"bold {COLOR_ERROR}")
+            for cyc in g.cycles[:10]:
+                cyc_text.append(f"  • {' -> '.join(cyc)}\n", style=COLOR_ERROR)
+            elements.append(cyc_text)
+
+        if g.unexpected_layer_dependencies:
+            viol_text = Text()
+            viol_text.append("\nArchitectural Layer Violations:\n", style=f"bold {COLOR_WARNING}")
+            for v in g.unexpected_layer_dependencies[:8]:
+                viol_text.append(
+                    f"  • {v['from_module']} ({v['from_layer']}) -> {v['to_module']} ({v['to_layer']})\n",
+                    style=COLOR_WARNING,
+                )
+            elements.append(viol_text)
+
+        self.console.print(
+            Panel(
+                Group(*elements),
+                title=f"[bold {COLOR_SECONDARY}]INTERNAL DEPENDENCY GRAPH & ARCHITECTURE INSIGHTS[/]",
+                border_style=COLOR_SECONDARY,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_debt_panel(
+        self,
+        result: ScanResult,
+        severity_filter: str | None = None,
+        category_filter: str | None = None,
+    ) -> None:
+        """Render technical debt items, hotspots, and dead-code heuristic indicators."""
+        debt = result.debt
+
+        items = debt.items
+        if severity_filter:
+            sf = severity_filter.lower()
+            items = [i for i in items if i.severity == sf]
+        if category_filter:
+            cf = category_filter.lower()
+            items = [i for i in items if cf in i.category.lower()]
+
+        sum_text = Text.from_markup(
+            f"Total Debt Items: [bold {COLOR_WHITE}]{debt.total_items}[/]  •  "
+            f"High: [bold {COLOR_ERROR}]{debt.by_severity.get('high', 0)}[/]  •  "
+            f"Medium: [bold {COLOR_WARNING}]{debt.by_severity.get('medium', 0)}[/]  •  "
+            f"Low: [bold {COLOR_SUCCESS}]{debt.by_severity.get('low', 0)}[/]  •  "
+            f"Dead-Code Heuristics: [bold {COLOR_SECONDARY}]{len(debt.dead_code_indicators)}[/]\n"
+        )
+
+        item_table = Table(box=SIMPLE, expand=True)
+        item_table.add_column("Severity", width=10)
+        item_table.add_column("Category", style=COLOR_SECONDARY, width=20)
+        item_table.add_column("Location", style=f"bold {COLOR_PRIMARY}", width=30)
+        item_table.add_column("Finding", style=COLOR_WHITE)
+
+        for item in items[:25]:
+            scol = (
+                COLOR_ERROR
+                if item.severity == "high"
+                else (COLOR_WARNING if item.severity == "medium" else COLOR_SUCCESS)
+            )
+            loc = f"{item.file_path}:{item.line_number}" if item.line_number else item.file_path
+            item_table.add_row(
+                f"[bold {scol}]{item.severity.upper()}[/]",
+                item.category,
+                truncate_string(loc, 30),
+                truncate_string(item.message, 60),
+            )
+
+        group_items: list[Any] = [sum_text, item_table]
+
+        if debt.dead_code_indicators:
+            dc_table = Table(box=SIMPLE, expand=True)
+            dc_table.add_column("Kind", style=COLOR_SECONDARY, width=20)
+            dc_table.add_column("Symbol / Target", style=f"bold {COLOR_PRIMARY}", width=24)
+            dc_table.add_column("Location", style=COLOR_MUTED, width=26)
+            dc_table.add_column("Confidence", width=10)
+            dc_table.add_column("Heuristic Reason", style=COLOR_WHITE)
+
+            for dc in debt.dead_code_indicators[:15]:
+                loc = f"{dc.file_path}:{dc.line_number}" if dc.line_number else dc.file_path
+                dc_table.add_row(
+                    dc.kind,
+                    dc.name,
+                    truncate_string(loc, 26),
+                    dc.confidence.upper(),
+                    truncate_string(dc.reason, 52),
+                )
+            group_items.append(
+                Panel(
+                    dc_table,
+                    title="[bold]Heuristic Dead-Code Indicators (Review Before Action)[/]",
+                    box=ROUNDED,
+                    border_style="dim",
+                )
+            )
+
+        self.console.print(
+            Panel(
+                Group(*group_items),
+                title=f"[bold {COLOR_WARNING}]TECHNICAL DEBT & DEAD-CODE ANALYSIS[/]",
+                border_style=COLOR_WARNING,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_security_panel(
+        self,
+        result: ScanResult,
+        severity_filter: str | None = None,
+    ) -> None:
+        """Render local security hygiene indicators with mandatory redaction."""
+        sec = result.security
+        findings = sec.findings
+        if severity_filter:
+            sf = severity_filter.lower()
+            findings = [f for f in findings if f.severity == sf]
+
+        header = Text.from_markup(
+            f"Total Findings: [bold {COLOR_WHITE}]{sec.total_findings}[/]  •  "
+            f"High: [bold {COLOR_ERROR}]{sec.by_severity.get('high', 0)}[/]  •  "
+            f"Medium: [bold {COLOR_WARNING}]{sec.by_severity.get('medium', 0)}[/]  •  "
+            f"Low: [bold {COLOR_SUCCESS}]{sec.by_severity.get('low', 0)}[/]\n"
+            f"[dim]Disclaimer: Local heuristic security indicators only; secrets are automatically redacted.[/dim]\n"
+        )
+
+        if not findings:
+            self.console.print(
+                Panel(
+                    Group(
+                        header,
+                        Text.from_markup(
+                            f"[{COLOR_SUCCESS}]✔ No matching security risk indicators found.[/]"
+                        ),
+                    ),
+                    title=f"[bold {COLOR_SUCCESS}]SECURITY HYGIENE INDICATORS[/]",
+                    border_style=COLOR_SUCCESS,
+                    box=ROUNDED,
+                )
+            )
+            self.console.print()
+            return
+
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("Rule", style=f"bold {COLOR_PRIMARY}", width=8)
+        table.add_column("Severity", width=9)
+        table.add_column("Location", style=COLOR_WHITE, width=28)
+        table.add_column("Finding & Redacted Snippet", style=COLOR_WHITE)
+        table.add_column("Recommendation", style=COLOR_MUTED, width=32)
+
+        for item in findings[:25]:
+            scol = (
+                COLOR_ERROR
+                if item.severity == "high"
+                else (COLOR_WARNING if item.severity == "medium" else COLOR_SUCCESS)
+            )
+            loc = f"{item.file_path}:{item.line_number}" if item.line_number else item.file_path
+            table.add_row(
+                item.rule_id,
+                f"[bold {scol}]{item.severity.upper()}[/]",
+                truncate_string(loc, 28),
+                f"{item.message}\n[dim]{truncate_string(item.redacted_snippet, 50)}[/dim]",
+                truncate_string(item.recommendation, 32),
+            )
+
+        border_col = COLOR_ERROR if sec.by_severity.get("high", 0) > 0 else COLOR_WARNING
+        self.console.print(
+            Panel(
+                Group(header, table),
+                title=f"[bold {border_col}]SECURITY HYGIENE INDICATORS (REDACTED)[/]",
+                border_style=border_col,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_monorepo_panel(self, result: ScanResult) -> None:
+        """Render monorepo and workspace detection results."""
+        mono = result.monorepo
+        info = Text.from_markup(
+            f"Monorepo Detected: [bold {COLOR_PRIMARY}]{'Yes' if mono.is_monorepo else 'No (Single-Package Repository)'}[/]  •  "
+            f"Workspace Tooling: [bold {COLOR_SECONDARY}]{', '.join(mono.workspace_tools) or 'None'}[/]  •  "
+            f"Sub-Packages: [bold {COLOR_WHITE}]{len(mono.packages)}[/]\n"
+        )
+
+        if not mono.packages:
+            self.console.print(
+                Panel(
+                    info,
+                    title=f"[bold {COLOR_PRIMARY}]MONOREPO & WORKSPACE ANALYSIS[/]",
+                    border_style=COLOR_PRIMARY,
+                    box=ROUNDED,
+                )
+            )
+            self.console.print()
+            return
+
+        pkg_table = Table(box=SIMPLE, expand=True)
+        pkg_table.add_column("Package Name", style=f"bold {COLOR_PRIMARY}")
+        pkg_table.add_column("Path", style=COLOR_WHITE)
+        pkg_table.add_column("Ecosystem", style=COLOR_SECONDARY)
+        pkg_table.add_column("Primary Lang", style=COLOR_ACCENT)
+        pkg_table.add_column("Files", justify="right", style=COLOR_WHITE)
+        pkg_table.add_column("Code Lines", justify="right", style=f"bold {COLOR_SUCCESS}")
+        pkg_table.add_column("Internal Deps", style=COLOR_WARNING)
+
+        for wp in mono.packages:
+            pkg_table.add_row(
+                wp.name,
+                wp.path,
+                wp.ecosystem,
+                wp.primary_language or "—",
+                format_number(wp.file_count),
+                format_number(wp.code_lines),
+                ", ".join(wp.internal_dependencies) or "[dim]None[/dim]",
+            )
+
+        self.console.print(
+            Panel(
+                Group(info, pkg_table),
+                title=f"[bold {COLOR_PRIMARY}]MONOREPO & WORKSPACE ANALYSIS[/]",
+                border_style=COLOR_PRIMARY,
                 box=ROUNDED,
             )
         )
@@ -413,7 +945,6 @@ class TerminalReporter:
         """Render Git analytics, status, activity timelines, and recent commits."""
         git = result.git
 
-        # Left: Repo details & activity
         left_table = Table(box=SIMPLE, show_header=False, expand=True)
         left_table.add_column("Property", style=f"bold {COLOR_MUTED}")
         left_table.add_column("Value", style=COLOR_WHITE)
@@ -421,9 +952,12 @@ class TerminalReporter:
         left_table.add_row("Current Branch", f"[bold {COLOR_PRIMARY}]{git.branch}[/]")
         left_table.add_row("HEAD Commit", git.commit_hash or "None")
         left_table.add_row("Total Commits", format_number(git.total_commits))
+        left_table.add_row("Commit Velocity", f"{git.commit_frequency_per_week:.2f} commits/week")
         left_table.add_row("Total Branches", str(git.total_branches))
         left_table.add_row("Tags", str(git.tags_count))
         left_table.add_row("Contributors", str(git.contributors_count))
+        if git.is_shallow:
+            left_table.add_row("Clone Type", f"[{COLOR_WARNING}]Shallow Clone[/]")
         if git.repository_size_bytes is not None:
             left_table.add_row("Git Directory Size", format_bytes(git.repository_size_bytes))
 
@@ -448,14 +982,13 @@ class TerminalReporter:
             "Activity (Last 90d)", f"[bold {COLOR_ACCENT}]{git.commit_activity_90d} commits[/]"
         )
 
-        # Right: Recent commits
         recent_table = Table(box=SIMPLE, expand=True)
         recent_table.add_column("Hash", style=f"bold {COLOR_PRIMARY}", width=8)
         recent_table.add_column("Author", style=COLOR_MUTED, width=14)
         recent_table.add_column("Date", style=COLOR_MUTED, width=10)
         recent_table.add_column("Message", style=COLOR_WHITE)
 
-        for c in git.recent_commits:
+        for c in git.recent_commits[:7]:
             recent_table.add_row(
                 c.hash, truncate_string(c.author, 13), c.date, truncate_string(c.message, 32)
             )
@@ -469,7 +1002,7 @@ class TerminalReporter:
                     border_style="dim",
                 ),
                 Panel(
-                    recent_table, title="[bold]Recent 5 Commits[/]", box=ROUNDED, border_style="dim"
+                    recent_table, title="[bold]Recent Commits[/]", box=ROUNDED, border_style="dim"
                 ),
             ],
             expand=True,
@@ -485,22 +1018,140 @@ class TerminalReporter:
         )
         self.console.print()
 
+    def render_git_contributors(self, result: ScanResult) -> None:
+        """Render Git contributors table."""
+        git = result.git
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("Rank", justify="right", style=COLOR_MUTED, width=6)
+        table.add_column("Contributor", style=f"bold {COLOR_WHITE}")
+        table.add_column("Commits", justify="right", style=f"bold {COLOR_PRIMARY}")
+        table.add_column("Share", justify="right", style=COLOR_SECONDARY)
+
+        tot = max(1, sum(cnt for _, cnt in git.contributors))
+        for idx, (author, cnt) in enumerate(git.contributors[:25], start=1):
+            pct = (cnt / tot) * 100.0
+            table.add_row(str(idx), author, format_number(cnt), format_percentage(pct))
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_PRIMARY}]GIT CONTRIBUTORS ({git.contributors_count})[/]",
+                border_style=COLOR_PRIMARY,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_git_churn(self, result: ScanResult) -> None:
+        """Render Git file modification frequency and line churn table."""
+        git = result.git
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("File Path", style=f"bold {COLOR_PRIMARY}")
+        table.add_column("Commits", justify="right", style=COLOR_WHITE)
+        table.add_column("Insertions (+)", justify="right", style=COLOR_SUCCESS)
+        table.add_column("Deletions (-)", justify="right", style=COLOR_ERROR)
+        table.add_column("Churn Score", justify="right", style=f"bold {COLOR_WARNING}")
+
+        for ch in git.file_churn[:25]:
+            table.add_row(
+                ch.path,
+                str(ch.commits),
+                f"+{format_number(ch.insertions)}",
+                f"-{format_number(ch.deletions)}",
+                str(ch.churn_score),
+            )
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_WARNING}]GIT FILE CHURN & MODIFICATION FREQUENCY[/]",
+                border_style=COLOR_WARNING,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_git_hotspots(self, result: ScanResult) -> None:
+        """Render Git hotspots combining high churn and code complexity."""
+        git = result.git
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("File Path", style=f"bold {COLOR_PRIMARY}")
+        table.add_column("Commits", justify="right", style=COLOR_WHITE)
+        table.add_column("Churn Lines", justify="right", style=COLOR_SECONDARY)
+        table.add_column("Max CC", justify="right", style=COLOR_WARNING)
+        table.add_column("LOC", justify="right", style=COLOR_MUTED)
+        table.add_column("Risk Score", justify="right", style=f"bold {COLOR_ERROR}")
+
+        for hs in git.hotspots[:20]:
+            table.add_row(
+                hs.path,
+                str(hs.commits),
+                format_number(hs.churn_lines),
+                str(hs.max_complexity),
+                format_number(hs.line_count),
+                f"{hs.risk_score:.1f}",
+            )
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_ERROR}]GIT ENGINEERING HOTSPOTS (CHURN × COMPLEXITY)[/]",
+                border_style=COLOR_ERROR,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_git_branches(self, result: ScanResult) -> None:
+        """Render Git branches and staleness status."""
+        git = result.git
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("Branch", style=f"bold {COLOR_PRIMARY}")
+        table.add_column("HEAD", style=COLOR_MUTED)
+        table.add_column("Last Commit Date", style=COLOR_WHITE)
+        table.add_column("Days Inactive", justify="right", style=COLOR_SECONDARY)
+        table.add_column("Status", justify="center")
+
+        for b in git.branches:
+            if b.is_current:
+                status = f"[bold {COLOR_SUCCESS}]CURRENT[/]"
+            elif b.is_stale:
+                status = f"[bold {COLOR_WARNING}]STALE (>90d)[/]"
+            else:
+                status = f"[{COLOR_PRIMARY}]ACTIVE[/]"
+            table.add_row(
+                f"* {b.name}" if b.is_current else b.name,
+                b.last_commit_hash,
+                b.last_commit_date,
+                str(b.days_since_commit),
+                status,
+            )
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_PRIMARY}]GIT BRANCHES ({len(git.branches)} local, {git.total_branches} total)[/]",
+                border_style=COLOR_PRIMARY,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
     def render_health_panel(self, result: ScanResult) -> None:
-        """Render project health checklist, code quality indicators, and completeness score."""
+        """Render 9-category project health score, explainable deductions, and recommendations."""
         h = result.health
 
-        # Score bar
         score_color = (
             COLOR_SUCCESS if h.score >= 80 else (COLOR_WARNING if h.score >= 50 else COLOR_ERROR)
         )
         score_bar = render_horizontal_bar(h.score, width=25)
 
         score_text = Text()
-        score_text.append("Completeness Score: ", style=f"bold {COLOR_WHITE}")
+        score_text.append("Repository Health Score: ", style=f"bold {COLOR_WHITE}")
         score_text.append(f"{h.score}/100 ", style=f"bold {score_color}")
         score_text.append(f"[{score_color}]{score_bar}[/]\n")
         score_text.append(
-            "[dim]Note: Heuristic completeness metric; does not evaluate correctness or security.[/dim]\n"
+            "[dim]Evaluated across 9 categories. Deductions distinguish missing evidence from defects.[/dim]\n"
         )
 
         # Left: Hygiene checklist
@@ -522,23 +1173,20 @@ class TerminalReporter:
         check_table.add_row("Formatter Configuration", _fmt_check(h.has_format_config))
         check_table.add_row("Type-checker Config", _fmt_check(h.has_typecheck_config))
 
-        # Right: Code indicators & score breakdown
+        # Right: 9-category breakdown
         ind_table = Table(box=SIMPLE, show_header=False, expand=True)
-        ind_table.add_column("Indicator", style=f"bold {COLOR_MUTED}")
-        ind_table.add_column("Count", justify="right", style=f"bold {COLOR_WHITE}")
+        ind_table.add_column("Category / Metric", style=f"bold {COLOR_MUTED}")
+        ind_table.add_column("Score / Count", justify="right", style=f"bold {COLOR_WHITE}")
 
-        ind_table.add_row("TODO Comments", str(h.todo_count))
-        ind_table.add_row("FIXME Comments", str(h.fixme_count))
-        ind_table.add_row("HACK Comments", str(h.hack_count))
-        ind_table.add_row("XXX Comments", str(h.xxx_count))
-        ind_table.add_row("Potential Debug Statements", str(h.potential_debug_statements_count))
-        ind_table.add_row("Unusually Long Files (>1000 LOC)", str(len(h.unusually_long_files)))
-        ind_table.add_row("Empty Source Files", str(len(h.empty_source_files)))
-        ind_table.add_row("Duplicate Files Detected", str(len(h.duplicate_files)))
+        for category, pts in h.score_breakdown.items():
+            max_pts = h.category_max_scores.get(category, 15)
+            ind_table.add_row(category, f"{pts}/{max_pts} pts")
 
         ind_table.add_row("─────────────────────", "──────")
-        for category, pts in h.score_breakdown.items():
-            ind_table.add_row(f"[dim]{category}[/]", f"[dim]{pts} pts[/]")
+        ind_table.add_row(
+            "TODO / FIXME / HACK", f"{h.todo_count} / {h.fixme_count} / {h.hack_count}"
+        )
+        ind_table.add_row("Duplicate Files", str(len(h.duplicate_files)))
 
         cols = Columns(
             [
@@ -547,7 +1195,7 @@ class TerminalReporter:
                 ),
                 Panel(
                     ind_table,
-                    title="[bold]Code Quality Indicators & Score Breakdown[/]",
+                    title="[bold]9-Category Score Breakdown[/]",
                     box=ROUNDED,
                     border_style="dim",
                 ),
@@ -555,9 +1203,43 @@ class TerminalReporter:
             expand=True,
         )
 
+        elements: list[Any] = [
+            Text.from_markup(
+                f"[bold {COLOR_WHITE}]Repository Health Score:[/] [bold {score_color}]{h.score}/100[/] [{score_color}]{score_bar}[/]\n"
+                f"[dim]Evaluated across 9 categories. Deductions distinguish missing evidence from defects.[/dim]\n"
+            ),
+            cols,
+        ]
+
+        if h.deductions:
+            ded_table = Table(box=SIMPLE, expand=True)
+            ded_table.add_column("Category", style=f"bold {COLOR_PRIMARY}", width=20)
+            ded_table.add_column("Pts", justify="right", style=f"bold {COLOR_ERROR}", width=5)
+            ded_table.add_column("Type", style=COLOR_SECONDARY, width=16)
+            ded_table.add_column("Reason", style=COLOR_WHITE)
+            ded_table.add_column("Recommendation", style=COLOR_SUCCESS)
+
+            for d in h.deductions[:10]:
+                dtype = "Missing Evidence" if d.is_missing_evidence else "Defect"
+                ded_table.add_row(
+                    d.category,
+                    f"-{d.points_deducted}",
+                    dtype,
+                    d.reason,
+                    d.recommendation,
+                )
+            elements.append(
+                Panel(
+                    ded_table,
+                    title="[bold]Explainable Deductions & Linked Recommendations[/]",
+                    box=ROUNDED,
+                    border_style="dim",
+                )
+            )
+
         self.console.print(
             Panel(
-                Group(score_text, cols),
+                Group(*elements),
                 title=f"[bold {score_color}]PROJECT HEALTH & CODE QUALITY[/]",
                 border_style=score_color,
                 box=ROUNDED,
@@ -567,7 +1249,6 @@ class TerminalReporter:
 
     def render_storage_panel(self, result: ScanResult, ranking_limit: int = 10) -> None:
         """Render storage breakdown by category and largest files."""
-        # Left: Storage breakdown
         st_table = Table(box=SIMPLE, show_header=False, expand=True)
         st_table.add_column("Category", style=f"bold {COLOR_MUTED}")
         st_table.add_column("Size", justify="right", style=f"bold {COLOR_WHITE}")
@@ -582,7 +1263,6 @@ class TerminalReporter:
             f"[bold {COLOR_PRIMARY}]{format_bytes(result.storage.total_project_size_bytes)}[/]",
         )
 
-        # Right: Top largest files
         lg_table = Table(box=SIMPLE, expand=True)
         lg_table.add_column("File Path", style=COLOR_WHITE)
         lg_table.add_column("Size", justify="right", style=f"bold {COLOR_WARNING}", width=12)
@@ -609,6 +1289,166 @@ class TerminalReporter:
             Panel(
                 cols,
                 title=f"[bold {COLOR_PRIMARY}]STORAGE ANALYTICS[/]",
+                border_style=COLOR_PRIMARY,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_coverage_panel(self, result: ScanResult) -> None:
+        """Render analysis coverage report showing discovered, analyzed, and omitted files."""
+        cov = result.coverage
+        line = Text.from_markup(
+            f"Discovered: [bold {COLOR_WHITE}]{format_number(cov.files_discovered)}[/]  •  "
+            f"Source Analyzed: [bold {COLOR_SUCCESS}]{format_number(cov.files_analyzed)}[/]  •  "
+            f"Ignored: [bold {COLOR_MUTED}]{format_number(cov.files_ignored)}[/]  •  "
+            f"Binary Skipped: [bold {COLOR_SECONDARY}]{format_number(cov.files_skipped_binary)}[/]  •  "
+            f"Non-Code/Config/Docs: [bold {COLOR_ACCENT}]{format_number(cov.unsupported_file_types)}[/]  •  "
+            f"Parse Failures: [bold {COLOR_ERROR if cov.parsing_failures else COLOR_MUTED}]{cov.parsing_failures}[/]"
+        )
+        self.console.print(
+            Panel(
+                line,
+                title=f"[bold {COLOR_ACCENT}]ANALYSIS COVERAGE REPORT[/]",
+                border_style=COLOR_ACCENT,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_ignored_items(self, result: ScanResult) -> None:
+        """Render explainable ignore rules report (--explain-ignored)."""
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("Ignored Path", style=f"bold {COLOR_PRIMARY}")
+        table.add_column("Type", style=COLOR_MUTED, width=8)
+        table.add_column("Source", style=COLOR_SECONDARY, width=16)
+        table.add_column("Pattern", style=COLOR_WARNING, width=20)
+        table.add_column("Explanation", style=COLOR_WHITE)
+
+        for item in result.ignored_items[:50]:
+            table.add_row(
+                item.path,
+                "dir" if item.is_dir else "file",
+                item.source,
+                item.pattern,
+                item.reason,
+            )
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_WARNING}]EXPLAIN IGNORED PATHS ({len(result.ignored_items)} matched)[/]",
+                border_style=COLOR_WARNING,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_comparison(self, diff: ComparisonDiff) -> None:
+        """Render snapshot-to-snapshot or project-to-project comparison diff."""
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("Metric", style=f"bold {COLOR_MUTED}")
+        table.add_column(diff.label_a, justify="right", style=COLOR_WHITE)
+        table.add_column(diff.label_b, justify="right", style=f"bold {COLOR_WHITE}")
+        table.add_column("Delta", justify="right")
+
+        for k, vals in diff.metrics.items():
+            va = vals.get("before", 0)
+            vb = vals.get("after", 0)
+            d = vals.get("delta", 0)
+            if d > 0:
+                d_str = f"[bold {COLOR_SUCCESS}]+{d}[/]"
+            elif d < 0:
+                d_str = f"[bold {COLOR_ERROR}]{d}[/]"
+            else:
+                d_str = "[dim]0[/dim]"
+            table.add_row(k.replace("_", " ").title(), str(va), str(vb), d_str)
+
+        elements: list[Any] = [table]
+
+        if diff.language_deltas:
+            lg_table = Table(box=SIMPLE, expand=True)
+            lg_table.add_column("Language", style=f"bold {COLOR_PRIMARY}")
+            lg_table.add_column("Before LOC", justify="right", style=COLOR_MUTED)
+            lg_table.add_column("After LOC", justify="right", style=COLOR_WHITE)
+            lg_table.add_column("Delta LOC", justify="right")
+
+            for lg, lvals in diff.language_deltas.items():
+                dc = lvals.get("delta_code", 0)
+                dc_str = (
+                    f"[{COLOR_SUCCESS}]+{dc}[/]"
+                    if dc > 0
+                    else (f"[{COLOR_ERROR}]{dc}[/]" if dc < 0 else "0")
+                )
+                lg_table.add_row(
+                    lg,
+                    str(lvals.get("before_code", 0)),
+                    str(lvals.get("after_code", 0)),
+                    dc_str,
+                )
+            elements.append(
+                Panel(lg_table, title="[bold]Language Deltas[/]", box=ROUNDED, border_style="dim")
+            )
+
+        if diff.dependencies_added or diff.dependencies_removed:
+            dep_text = Text()
+            if diff.dependencies_added:
+                dep_text.append(
+                    f"Added Dependencies (+{len(diff.dependencies_added)}): {', '.join(diff.dependencies_added)}\n",
+                    style=COLOR_SUCCESS,
+                )
+            if diff.dependencies_removed:
+                dep_text.append(
+                    f"Removed Dependencies (-{len(diff.dependencies_removed)}): {', '.join(diff.dependencies_removed)}\n",
+                    style=COLOR_ERROR,
+                )
+            elements.append(dep_text)
+
+        self.console.print(
+            Panel(
+                Group(*elements),
+                title=f"[bold {COLOR_PRIMARY}]COMPARISON: {diff.label_a} vs {diff.label_b}[/]",
+                border_style=COLOR_PRIMARY,
+                box=ROUNDED,
+            )
+        )
+        self.console.print()
+
+    def render_history(self, snapshots: Sequence[dict[str, Any]]) -> None:
+        """Render saved repository snapshots timeline."""
+        if not snapshots:
+            self.console.print(
+                f"[{COLOR_WARNING}]No snapshots recorded yet. Run `rpx snapshot` to save a snapshot.[/]"
+            )
+            return
+
+        table = Table(box=SIMPLE, expand=True)
+        table.add_column("Snapshot ID", style=f"bold {COLOR_PRIMARY}")
+        table.add_column("Label", style=COLOR_SECONDARY)
+        table.add_column("Created At", style=COLOR_MUTED)
+        table.add_column("Git Commit", style=COLOR_ACCENT)
+        table.add_column("Files", justify="right", style=COLOR_WHITE)
+        table.add_column("Code LOC", justify="right", style=f"bold {COLOR_SUCCESS}")
+        table.add_column("Debt", justify="right", style=COLOR_WARNING)
+        table.add_column("Health", justify="right", style=f"bold {COLOR_WHITE}")
+
+        for s in snapshots:
+            m = s.get("metrics", {})
+            table.add_row(
+                str(s.get("snapshot_id", "")),
+                str(s.get("label", "")),
+                str(s.get("created_at", ""))[:19].replace("T", " "),
+                str(s.get("git_commit") or "—"),
+                format_number(int(m.get("total_files", 0))),
+                format_number(int(m.get("code_lines", 0))),
+                str(m.get("debt_total", 0)),
+                f"{m.get('health_score', 0)}/100",
+            )
+
+        self.console.print(
+            Panel(
+                table,
+                title=f"[bold {COLOR_PRIMARY}]REPOSITORY SNAPSHOT HISTORY ({len(snapshots)})[/]",
                 border_style=COLOR_PRIMARY,
                 box=ROUNDED,
             )

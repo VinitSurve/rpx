@@ -5,6 +5,9 @@ from typing import Final
 # Schema version for exported JSON
 SCHEMA_VERSION: Final[str] = "1.0.0"
 
+# Maximum file size for LOC/AST analysis (15 MB)
+MAX_LOC_FILE_SIZE_BYTES: Final[int] = 15 * 1024 * 1024
+
 # Color Palette (Rich markup hexes)
 COLOR_PRIMARY: Final[str] = "#00D9FF"  # Cyan
 COLOR_SECONDARY: Final[str] = "#A78BFA"  # Purple
