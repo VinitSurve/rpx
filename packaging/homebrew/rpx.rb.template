@@ -1,0 +1,21 @@
+class Rpx < Formula
+  include Language::Python::Virtualenv
+
+  desc "Repository Project Explorer | Comprehensive local-first developer utility"
+  homepage "https://github.com/VinitSurve/rpx"
+  url "https://files.pythonhosted.org/packages/source/r/rpx/rpx-{{VERSION}}.tar.gz"
+  sha256 "{{SHA256_CHECKSUM}}"
+  license "MIT"
+
+  depends_on "python@3.11"
+
+  def install
+    virtualenv_install_with_resources
+  end
+
+  test do
+    assert_match "RPX version", shell_output("#{bin}/rpx --version")
+    assert_match "Repository Project Explorer", shell_output("#{bin}/rpx --help")
+  end
+end
+

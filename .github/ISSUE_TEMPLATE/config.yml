@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Reporting
+    url: https://github.com/VinitSurve/rpx/security/advisories/new
+    about: Privately report a security vulnerability in RPX.
+  - name: Architecture & Developer Documentation
+    url: https://github.com/VinitSurve/rpx/blob/main/ARCHITECTURE.md
+    about: Read RPX architectural design and internal component documentation.
+

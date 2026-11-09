@@ -42,16 +42,20 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
-    "build>=1.0.0"
+    "build>=1.0.0",
+    "twine>=4.0.0",
+    "pip-audit>=2.7.0"
 ]
 
 [project.scripts]
 rpx = "rpx.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/vinit/rpx"
-Repository = "https://github.com/vinit/rpx"
-Issues = "https://github.com/vinit/rpx/issues"
+Homepage = "https://github.com/VinitSurve/rpx"
+Repository = "https://github.com/VinitSurve/rpx"
+Issues = "https://github.com/VinitSurve/rpx/issues"
+Documentation = "https://github.com/VinitSurve/rpx#readme"
+Changelog = "https://github.com/VinitSurve/rpx/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]

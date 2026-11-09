@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Maintain Python dependencies in pyproject.toml
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "VinitSurve"
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      dev-tooling:
+        patterns:
+          - "pytest*"
+          - "ruff*"
+          - "build*"
+          - "twine*"
+          - "pip-audit*"
+      core-dependencies:
+        patterns:
+          - "typer*"
+          - "rich*"
+          - "pathspec*"
+          - "packaging*"
+
+  # Maintain GitHub Actions workflow dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "VinitSurve"
+    commit-message:
+      prefix: "ci(deps):"
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+

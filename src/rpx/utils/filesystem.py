@@ -23,10 +23,17 @@ def get_creation_time(stat_res: os.stat_result | None) -> str | None:
     """Extract filesystem creation/birth time if reliably supported by the OS."""
     if not stat_res:
         return None
-    # macOS supports st_birthtime
+    # macOS and BSD support st_birthtime
     if hasattr(stat_res, "st_birthtime") and stat_res.st_birthtime > 0:
         try:
             dt = datetime.fromtimestamp(stat_res.st_birthtime, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        except (ValueError, OSError):
+            return None
+    # Windows supports st_ctime as file creation time
+    if os.name == "nt" and hasattr(stat_res, "st_ctime") and stat_res.st_ctime > 0:
+        try:
+            dt = datetime.fromtimestamp(stat_res.st_ctime, tz=timezone.utc)
             return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
         except (ValueError, OSError):
             return None

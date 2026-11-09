@@ -1,0 +1,51 @@
+name: "Compatibility Issue"
+description: "Report an OS, Python runtime, or terminal incompatibility with RPX."
+title: "[Compat]: "
+labels: ["compatibility", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        RPX aims to be fully cross-platform across Linux, macOS, and Windows on Python 3.11+.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 11 / 10
+        - Ubuntu / Debian
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Arch / Fedora / RHEL
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: python_version
+    attributes:
+      label: Python Version
+      placeholder: "Python 3.12.2"
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal Emulator & Shell
+      placeholder: "Windows Terminal with PowerShell 7 / iTerm2 with zsh"
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Compatibility Problem Details
+      description: Describe what failed, including rendering glitches, path issues, or missing OS APIs.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Error Output
+      render: shell
+    validations:
+      required: false
+

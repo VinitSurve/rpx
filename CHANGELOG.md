@@ -5,6 +5,38 @@ All notable changes to the **RPX (Repository Project Explorer)** project will be
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Cross-Platform Compatibility**:
+  - Enhanced creation-time resolution in `src/rpx/utils/filesystem.py` supporting Windows `st_ctime` alongside macOS/BSD `st_birthtime`.
+  - Added explicit UTF-8 encoding and error replacement to Git subprocess invocations in `src/rpx/utils/git_utils.py` for Windows terminal compatibility.
+- **Continuous Integration (CI)**:
+  - Cross-platform multi-version matrix workflow (`.github/workflows/ci.yml`) testing Python 3.11, 3.12, and 3.13 on Ubuntu, macOS, and Windows.
+  - Automated static checks: compilation check (`compileall`), Ruff lint, and Ruff format verification.
+  - Test suite automation with Pytest, XML/term coverage reporting, and coverage threshold enforcement.
+  - Package validation stage: clean-room wheel install, console entry point verification, and smoke tests.
+- **Release Automation & PyPI Trusted Publishing**:
+  - Version-tag triggered release workflow (`.github/workflows/release.yml`) with strict tag-to-metadata consistency checks.
+  - Automated distribution builds (sdist and wheel), Twine metadata validation, and SHA-256 checksum generation.
+  - Automated GitHub Releases with changelog-extracted release notes and attached distribution assets.
+  - PyPI Trusted Publishing via GitHub OIDC (`id-token: write`).
+- **Security & Vulnerability Management**:
+  - CodeQL automated semantic analysis workflow (`.github/workflows/codeql.yml`).
+  - Automated dependency vulnerability auditing with `pip-audit`.
+  - Formal Security Policy (`SECURITY.md`) with GitHub Private Vulnerability Reporting instructions.
+- **Open-Source Governance & Community**:
+  - Contributor Covenant v2.1 Code of Conduct (`CODE_OF_CONDUCT.md`).
+  - Getting Support guide (`SUPPORT.md`).
+  - Comprehensive contributor documentation (`CONTRIBUTING.md`).
+  - Standardized Pull Request template (`.github/PULL_REQUEST_TEMPLATE.md`).
+  - Structured GitHub Issue Forms (`.github/ISSUE_TEMPLATE/` for bugs, features, documentation, and compatibility).
+  - Repository label hierarchy (`.github/labels.yml`).
+  - Branch protection and repository security guidelines (`docs/BRANCH_PROTECTION.md`).
+- **Distribution Channels**:
+  - Minimal multi-stage container image (`Dockerfile`, `.dockerignore`) with non-root execution and read-only volume mounts.
+  - Dedicated Homebrew formula template and tap instructions (`packaging/homebrew/`).
+
 ## [1.0.0] - 2026-11-09
 
 ### Added

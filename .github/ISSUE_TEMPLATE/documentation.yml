@@ -1,0 +1,32 @@
+name: "Documentation Issue"
+description: "Report a mistake, unclear section, or missing documentation in RPX."
+title: "[Docs]: "
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping keep RPX documentation accurate and helpful!
+  - type: input
+    id: location
+    attributes:
+      label: Documentation Page / Section
+      description: Where in the documentation did you spot the issue?
+      placeholder: "README.md, 'Configuration' section"
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What needs to be improved?
+      description: Describe what is missing, unclear, outdated, or incorrect.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Change
+      description: How should the documentation read instead?
+    validations:
+      required: false
+

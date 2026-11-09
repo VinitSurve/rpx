@@ -1,0 +1,78 @@
+name: "Bug Report"
+description: "File an issue about unexpected behavior, crashes, or incorrect statistics in RPX."
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug in RPX! Please make sure this issue has not already been reported by searching the issue tracker.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: "When running 'rpx scan', the CLI outputs..."
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command Executed
+      description: The exact RPX command and arguments you executed.
+      placeholder: "rpx scan /path/to/project --depth 2"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run 'rpx scan .'
+        2. Notice that...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Actual Output / Traceback
+      description: Please paste the full terminal output or traceback here.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Ubuntu / Debian Linux
+        - Other Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: rpx_version
+    attributes:
+      label: RPX Version
+      description: Run `rpx --version`.
+      placeholder: "RPX version 1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: python_version
+    attributes:
+      label: Python Version
+      description: Run `python3 --version`.
+      placeholder: "Python 3.11.8"
+    validations:
+      required: true
+

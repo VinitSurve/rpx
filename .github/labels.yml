@@ -1,0 +1,48 @@
+- name: "bug"
+  color: "d73a4a"
+  description: "Something isn't working"
+
+- name: "enhancement"
+  color: "a2eeef"
+  description: "New feature or request"
+
+- name: "documentation"
+  color: "0075ca"
+  description: "Improvements or additions to documentation"
+
+- name: "security"
+  color: "ee0701"
+  description: "Security vulnerability or hygiene audit"
+
+- name: "dependencies"
+  color: "0366d6"
+  description: "Pull requests that update dependency versions"
+
+- name: "ci"
+  color: "1d76db"
+  description: "CI/CD workflows and automated pipelines"
+
+- name: "performance"
+  color: "f9d0c4"
+  description: "Performance optimization or scanning speedup"
+
+- name: "compatibility"
+  color: "bfdadc"
+  description: "OS or Python runtime compatibility"
+
+- name: "good first issue"
+  color: "7057ff"
+  description: "Good for newcomers"
+
+- name: "help wanted"
+  color: "008672"
+  description: "Extra attention is needed"
+
+- name: "triage"
+  color: "fbca04"
+  description: "Needs maintainer triage"
+
+- name: "release"
+  color: "5319e7"
+  description: "Release engineering and distribution"
+

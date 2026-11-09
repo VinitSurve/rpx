@@ -32,6 +32,8 @@ ENV/
 .nox/
 .coverage
 .coverage.*
+coverage.xml
+*.cov
 htmlcov/
 .pytest_cache/
 .mypy_cache/
